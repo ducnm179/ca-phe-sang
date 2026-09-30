@@ -1,0 +1,40 @@
+# Chạy MỘT LẦN (thủ công) để đăng ký webhook cho Viber Channel
+# và kiểm tra token có đọc được thông tin kênh hay không.
+# Đặt file này tại: .github/workflows/viber-setup.yml
+
+name: Viber – cài webhook (chạy 1 lần)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Đăng ký webhook với Viber
+        env:
+          VIBER_TOKEN: ${{ secrets.VIBER_TOKEN }}
+          WEBHOOK_URL: ${{ secrets.VIBER_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          payload=$(jq -n --arg url "$WEBHOOK_URL" '{url: $url}')
+          resp=$(curl -sS -X POST https://chatapi.viber.com/pa/set_webhook \
+            -H "X-Viber-Auth-Token: $VIBER_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+          echo "$resp" | jq -c '{status, status_message}'
+          [ "$(echo "$resp" | jq -r .status)" = "0" ] || { echo "set_webhook thất bại"; exit 1; }
+
+      - name: Kiểm tra token đọc được thông tin kênh
+        env:
+          VIBER_TOKEN: ${{ secrets.VIBER_TOKEN }}
+        run: |
+          set -euo pipefail
+          resp=$(curl -sS -X POST https://chatapi.viber.com/pa/get_account_info \
+            -H "X-Viber-Auth-Token: $VIBER_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          # Chỉ in thông tin tối thiểu — không in danh sách thành viên ra log công khai
+          echo "$resp" | jq -c '{status, status_message, channel: .name,
+            superadmins: ([.members[]? | select(.role == "superadmin")] | length)}'
+          [ "$(echo "$resp" | jq -r .status)" = "0" ] || exit 1
