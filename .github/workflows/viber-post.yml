@@ -1,0 +1,104 @@
+# Tự động đăng "Điểm tin thị trường – Cà phê sáng" lên Viber Channel
+# mỗi khi bản tin mới được đẩy lên GitHub Pages.
+# Đặt file này tại: .github/workflows/viber-post.yml
+#
+# Cần có trong Settings → Secrets and variables → Actions:
+#   Secret   VIBER_TOKEN      : token lấy từ Channel info → Developer Tools
+#   Variable BRIEF_URL        : link bản tin, vd https://<user>.github.io/<repo>/
+#   Variable VIBER_DISCLAIMER : (tuỳ chọn) dòng miễn trừ trách nhiệm
+
+name: Viber – đăng Cà phê sáng
+
+on:
+  push:
+    branches: [main]            # ← đổi nếu Pages chạy từ nhánh khác (vd gh-pages)
+    paths:
+      - 'index.html'            # ← đổi thành file/thư mục chứa bản tin của bạn
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Đăng lại kể cả khi hôm nay đã đăng'
+        type: boolean
+        default: false
+
+concurrency:
+  group: viber-post
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Ho_Chi_Minh
+    steps:
+      - name: Lấy ngày hôm nay (giờ Việt Nam)
+        id: d
+        run: |
+          echo "ymd=$(date +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          echo "dmy=$(date +%d/%m/%Y)" >> "$GITHUB_OUTPUT"
+
+      - name: Kiểm tra hôm nay đã đăng chưa (chống đăng trùng)
+        id: seen
+        uses: actions/cache/restore@v4
+        with:
+          path: .viber-posted
+          key: viber-posted-${{ steps.d.outputs.ymd }}
+          lookup-only: true
+
+      - name: Chờ GitHub Pages cập nhật xong
+        if: steps.seen.outputs.cache-hit != 'true' || inputs.force
+        env:
+          BRIEF_URL: ${{ vars.BRIEF_URL }}
+        run: |
+          sleep 60
+          for i in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$BRIEF_URL")
+            [ "$code" = "200" ] && { echo "Trang đã sẵn sàng"; exit 0; }
+            echo "Lần $i: HTTP $code, chờ thêm..."; sleep 30
+          done
+          echo "Trang bản tin không phản hồi 200 — dừng, không đăng."; exit 1
+
+      - name: Đăng lên Viber Channel
+        if: steps.seen.outputs.cache-hit != 'true' || inputs.force
+        env:
+          VIBER_TOKEN: ${{ secrets.VIBER_TOKEN }}
+          BRIEF_URL: ${{ vars.BRIEF_URL }}
+          DISCLAIMER: ${{ vars.VIBER_DISCLAIMER || 'Thông tin chỉ mang tính tham khảo, không phải khuyến nghị đầu tư.' }}
+          DMY: ${{ steps.d.outputs.dmy }}
+          YMD: ${{ steps.d.outputs.ymd }}
+        run: |
+          set -euo pipefail
+
+          # 1) Lấy ID superadmin (bắt buộc cho trường "from")
+          info=$(curl -sS -X POST https://chatapi.viber.com/pa/get_account_info \
+            -H "X-Viber-Auth-Token: $VIBER_TOKEN" \
+            -H "Content-Type: application/json" -d '{}')
+          admin_id=$(echo "$info" | jq -r '[.members[]? | select(.role == "superadmin") | .id][0] // empty')
+          if [ -z "$admin_id" ]; then
+            echo "Không lấy được ID superadmin: $(echo "$info" | jq -c '{status, status_message}')"
+            exit 1
+          fi
+
+          # 2) Soạn nội dung (thêm ?d=YYYYMMDD để Viber không dùng lại link preview cũ)
+          text=$(printf '☕ Điểm tin thị trường – Cà phê sáng | %s\n\n👉 Đọc bản tin: %s?d=%s\n\n%s' \
+            "$DMY" "$BRIEF_URL" "$YMD" "$DISCLAIMER")
+
+          payload=$(jq -n --arg from "$admin_id" --arg text "$text" \
+            '{from: $from, sender: {name: "Cà phê sáng"}, type: "text", text: $text}')
+
+          # 3) Đăng bài
+          resp=$(curl -sS -X POST https://chatapi.viber.com/pa/post \
+            -H "X-Viber-Auth-Token: $VIBER_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+          echo "$resp" | jq -c '{status, status_message}'
+          [ "$(echo "$resp" | jq -r .status)" = "0" ] || { echo "Đăng bài thất bại"; exit 1; }
+
+          mkdir -p .viber-posted && echo "$YMD" > .viber-posted/done
+
+      - name: Đánh dấu đã đăng hôm nay
+        if: success() && (steps.seen.outputs.cache-hit != 'true' || inputs.force)
+        uses: actions/cache/save@v4
+        with:
+          path: .viber-posted
+          key: viber-posted-${{ steps.d.outputs.ymd }}
