@@ -34,8 +34,11 @@ jobs:
       - name: Lấy ngày hôm nay (giờ Việt Nam)
         id: d
         run: |
-          echo "ymd=$(date +%Y%m%d)" >> "$GITHUB_OUTPUT"
-          echo "dmy=$(date +%d/%m/%Y)" >> "$GITHUB_OUTPUT"
+          {
+            echo "ymd=$(date +%Y%m%d)"
+            echo "dmy=$(date +%d/%m/%Y)"
+            echo "ymd_dash=$(date +%Y-%m-%d)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Kiểm tra hôm nay đã đăng chưa (chống đăng trùng)
         id: seen
@@ -49,10 +52,12 @@ jobs:
         if: steps.seen.outputs.cache-hit != 'true' || inputs.force
         env:
           BRIEF_URL: ${{ vars.BRIEF_URL }}
+          YMD_DASH: ${{ steps.d.outputs.ymd_dash }}
         run: |
+          PAGE="${BRIEF_URL%/}/archive/${YMD_DASH}.html"
           sleep 60
           for i in $(seq 1 10); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "$BRIEF_URL")
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$PAGE")
             [ "$code" = "200" ] && { echo "Trang đã sẵn sàng"; exit 0; }
             echo "Lần $i: HTTP $code, chờ thêm..."; sleep 30
           done
@@ -66,6 +71,7 @@ jobs:
           DISCLAIMER: ${{ vars.VIBER_DISCLAIMER || 'Thông tin chỉ mang tính tham khảo, không phải khuyến nghị đầu tư.' }}
           DMY: ${{ steps.d.outputs.dmy }}
           YMD: ${{ steps.d.outputs.ymd }}
+          YMD_DASH: ${{ steps.d.outputs.ymd_dash }}
         run: |
           set -euo pipefail
 
@@ -79,9 +85,10 @@ jobs:
             exit 1
           fi
 
-          # 2) Soạn nội dung (thêm ?d=YYYYMMDD để Viber không dùng lại link preview cũ)
-          text=$(printf '☕ Điểm tin thị trường – Cà phê sáng | %s\n\n👉 Đọc bản tin: %s?d=%s\n\n%s' \
-            "$DMY" "$BRIEF_URL" "$YMD" "$DISCLAIMER")
+          # 2) Soạn nội dung: link cố định tới số của ngày hôm nay trong archive/
+          PAGE="${BRIEF_URL%/}/archive/${YMD_DASH}.html"
+          text=$(printf '☕ Điểm tin thị trường – Cà phê sáng | %s\n\n👉 Đọc bản tin: %s\n\n📚 Các số trước: %s/archive/\n\n%s' \
+            "$DMY" "$PAGE" "${BRIEF_URL%/}" "$DISCLAIMER")
 
           payload=$(jq -n --arg from "$admin_id" --arg text "$text" \
             '{from: $from, sender: {name: "Cà phê sáng"}, type: "text", text: $text}')
