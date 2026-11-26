@@ -1,0 +1,63 @@
+# Gửi báo cáo "Đối chiếu tỷ giá trung tâm SBV–TCB" lên Viber Channel RIÊNG
+# mỗi khi tác vụ hằng ngày ghi đè file tygia/bao-cao.txt.
+# Tách hoàn toàn khỏi workflow Cà phê sáng (viber-post.yml): khác file kích hoạt,
+# khác token, khác kênh.
+#
+# Cần có trong Settings → Secrets and variables → Actions:
+#   Secret   VIBER_TOKEN_TYGIA : token của kênh Viber riêng
+#                                (Channel info → Developer Tools → Token)
+
+name: Viber – báo cáo đối chiếu tỷ giá trung tâm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tygia/bao-cao.txt'
+  workflow_dispatch:
+
+concurrency:
+  group: viber-tygia
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lấy mã nguồn
+        uses: actions/checkout@v4
+
+      - name: Đăng báo cáo lên Viber Channel riêng
+        env:
+          VIBER_TOKEN: ${{ secrets.VIBER_TOKEN_TYGIA }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${VIBER_TOKEN}" ]; then
+            echo "Chưa có secret VIBER_TOKEN_TYGIA — dừng."; exit 1
+          fi
+
+          f=tygia/bao-cao.txt
+          [ -s "$f" ] || { echo "File báo cáo trống hoặc không có — dừng."; exit 1; }
+
+          # Viber giới hạn ~7000 ký tự cho tin nhắn văn bản
+          text=$(head -c 6500 "$f")
+
+          info=$(curl -sS -X POST https://chatapi.viber.com/pa/get_account_info \
+            -H "X-Viber-Auth-Token: $VIBER_TOKEN" \
+            -H "Content-Type: application/json" -d '{}')
+          admin_id=$(echo "$info" | jq -r '[.members[]? | select(.role == "superadmin") | .id][0] // empty')
+          if [ -z "$admin_id" ]; then
+            echo "Không lấy được ID superadmin: $(echo "$info" | jq -c '{status, status_message}')"
+            exit 1
+          fi
+
+          payload=$(jq -n --arg from "$admin_id" --arg text "$text" \
+            '{from: $from, sender: {name: "Đối chiếu tỷ giá"}, type: "text", text: $text}')
+
+          resp=$(curl -sS -X POST https://chatapi.viber.com/pa/post \
+            -H "X-Viber-Auth-Token: $VIBER_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+          echo "$resp" | jq -c '{status, status_message}'
+          [ "$(echo "$resp" | jq -r .status)" = "0" ] || { echo "Đăng bài thất bại"; exit 1; }
