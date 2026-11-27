@@ -1,0 +1,18 @@
+# Ngày nghỉ lễ/Tết rơi vào Thứ 2–Thứ 6 — job đối chiếu tỷ giá tự BỎ QUA các ngày này
+# (cuối tuần đã được bỏ qua sẵn trong lịch chạy).
+# Mỗi dòng một ngày, định dạng YYYY-MM-DD; phần sau dấu # là ghi chú.
+# Cập nhật mỗi năm khi Chính phủ/Bộ Nội vụ công bố lịch nghỉ mới.
+
+# ---- 2027 ----
+2027-01-01  # Tết Dương lịch (Thứ 6)
+2027-02-04  # Tết Nguyên đán – 28 tháng Chạp (Thứ 5)
+2027-02-05  # Tết Nguyên đán – 29 tháng Chạp (Thứ 6)
+2027-02-08  # Tết Nguyên đán – mùng 3 (Thứ 2)
+2027-02-09  # Tết Nguyên đán – mùng 4 (Thứ 3)
+2027-02-10  # Tết Nguyên đán – mùng 5 (Thứ 4)
+2027-04-16  # Giỗ Tổ Hùng Vương 10/3 âm lịch (Thứ 6)
+2027-04-30  # Ngày Giải phóng miền Nam (Thứ 6)
+2027-05-03  # Nghỉ bù Quốc tế Lao động 1/5 rơi vào Thứ 7 (Thứ 2)
+2027-09-02  # Quốc khánh (Thứ 5)
+2027-09-03  # Quốc khánh – ngày nghỉ thứ hai (Thứ 6)
+2027-11-24  # Ngày Văn hóa Việt Nam (Thứ 4)

@@ -1,7 +1,8 @@
 # Đối chiếu tỷ giá trung tâm USD/VND: SBV công bố vs TCB hiển thị
 # Chạy hoàn toàn trên GitHub Actions (không cần máy tính, không cần Claude).
 #
-# Chỉ chạy Thứ 2–Thứ 6 (cuối tuần SBV không công bố tỷ giá trung tâm).
+# Chỉ chạy Thứ 2–Thứ 6 (cuối tuần SBV không công bố tỷ giá trung tâm),
+# và bỏ qua các ngày nghỉ lễ liệt kê trong tygia/ngay-nghi.txt.
 # Lịch: lịch của GitHub hay trễ 5–30 phút, nên workflow được gọi sớm (7:07, dự phòng 7:37 và 8:12),
 # rồi CHỜ đến đúng 08:30 giờ VN mới đọc hai trang — đọc MỘT lần duy nhất, không thử lại.
 # Mỗi ngày chỉ đối chiếu một lần: lần gọi dự phòng thấy đã có kết quả hôm nay thì bỏ qua.
@@ -47,8 +48,11 @@ jobs:
         id: guard
         run: |
           git pull -q origin main || true
-          f="tygia/archive/$(date +%Y-%m-%d).txt"
-          if [ "${{ github.event_name }}" = "schedule" ] && [ -f "$f" ]; then
+          today=$(date +%Y-%m-%d)
+          f="tygia/archive/$today.txt"
+          if [ "${{ github.event_name }}" = "schedule" ] && grep -qE "^$today([[:space:]]|#|$)" tygia/ngay-nghi.txt 2>/dev/null; then
+            echo "Hôm nay $today là ngày nghỉ lễ (tygia/ngay-nghi.txt) — không chạy."; echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "schedule" ] && [ -f "$f" ]; then
             echo "Đã có $f — bỏ qua lần gọi này."; echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
