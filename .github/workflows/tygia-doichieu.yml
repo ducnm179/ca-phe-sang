@@ -1,6 +1,7 @@
 # Đối chiếu tỷ giá trung tâm USD/VND: SBV công bố vs TCB hiển thị
 # Chạy hoàn toàn trên GitHub Actions (không cần máy tính, không cần Claude).
 #
+# Chỉ chạy Thứ 2–Thứ 6 (cuối tuần SBV không công bố tỷ giá trung tâm).
 # Lịch: lịch của GitHub hay trễ 5–30 phút, nên workflow được gọi sớm (7:07, dự phòng 7:37 và 8:12),
 # rồi CHỜ đến đúng 08:30 giờ VN mới đọc hai trang — đọc MỘT lần duy nhất, không thử lại.
 # Mỗi ngày chỉ đối chiếu một lần: lần gọi dự phòng thấy đã có kết quả hôm nay thì bỏ qua.
@@ -15,9 +16,9 @@ name: Đối chiếu tỷ giá trung tâm SBV–TCB
 
 on:
   schedule:
-    - cron: '7 0 * * *'         # 07:07 giờ VN — lần gọi chính, chờ đến 08:30
-    - cron: '37 0 * * *'        # 07:37 giờ VN — dự phòng 1
-    - cron: '12 1 * * *'        # 08:12 giờ VN — dự phòng 2 (lần nào chạy trước thì làm, các lần sau tự bỏ qua)
+    - cron: '7 0 * * 1-5'        # 07:07 giờ VN — lần gọi chính, chờ đến 08:30
+    - cron: '37 0 * * 1-5'       # 07:37 giờ VN — dự phòng 1
+    - cron: '12 1 * * 1-5'       # 08:12 giờ VN — dự phòng 2 (lần nào chạy trước thì làm, các lần sau tự bỏ qua)
   workflow_dispatch:
     inputs:
       dry_run:
