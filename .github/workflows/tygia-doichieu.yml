@@ -105,9 +105,17 @@ jobs:
         if: steps.guard.outputs.skip != 'true' && env.DRY_RUN != 'true'
         env:
           VIBER_TOKEN: ${{ secrets.VIBER_TOKEN_TYGIA }}
+          WEBHOOK_URL: ${{ secrets.VIBER_WEBHOOK_URL }}
         run: |
           set -euo pipefail
           [ -n "${VIBER_TOKEN}" ] || { echo "Chưa có secret VIBER_TOKEN_TYGIA — không gửi."; exit 1; }
+          # Viber chỉ cho kênh đăng bài qua API khi đã đăng ký webhook — đăng ký lại mỗi lần cho chắc
+          if [ -n "${WEBHOOK_URL}" ]; then
+            wh=$(curl -sS -X POST https://chatapi.viber.com/pa/set_webhook \
+              -H "X-Viber-Auth-Token: $VIBER_TOKEN" -H "Content-Type: application/json" \
+              -d "$(jq -n --arg url "$WEBHOOK_URL" '{url: $url}')")
+            echo "set_webhook: $(echo "$wh" | jq -c '{status, status_message}')"
+          fi
           text=$(head -c 6500 tygia/bao-cao.txt)
           info=$(curl -sS -X POST https://chatapi.viber.com/pa/get_account_info \
             -H "X-Viber-Auth-Token: $VIBER_TOKEN" -H "Content-Type: application/json" -d '{}')
