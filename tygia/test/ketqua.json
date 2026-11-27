@@ -1,0 +1,24 @@
+{
+  "thoi_diem": "2026-11-27T09:15:39.886460+07:00",
+  "so_lan_doc": 1,
+  "ket_luan": "✅",
+  "sbv": {
+    "central": 25687,
+    "ngay_ap_dung": "27/11/2026",
+    "so_van_ban": "490/TB-NHNN",
+    "cach_doc": "http"
+  },
+  "tcb": {
+    "central": 25687,
+    "ceiling": 26971,
+    "floor": 24403,
+    "ngay_cap_nhat": "2026-11-27",
+    "gio_cap_nhat": "08:45:54",
+    "cach_doc": "json"
+  },
+  "ghi_chu": [],
+  "chan_doan": {
+    "sbv_http": 200,
+    "tcb_http": 200
+  }
+}
