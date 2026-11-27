@@ -1,29 +1,28 @@
 # Đối chiếu tỷ giá trung tâm USD/VND: SBV công bố vs TCB hiển thị
-# Chạy hoàn toàn trên GitHub Actions (không cần máy tính, không cần Claude):
-#   8:30 sáng hằng ngày (giờ VN) → đọc SBV + TCB → so sánh → ghi tygia/ → gửi Viber kênh riêng.
-# Nếu TCB chưa cập nhật số hôm nay hoặc còn lệch SBV, tự đọc lại mỗi 5 phút đến 09:20.
+# Chạy hoàn toàn trên GitHub Actions (không cần máy tính, không cần Claude).
 #
-# Cần secret: VIBER_TOKEN_TYGIA (token kênh Viber riêng).
-# Chạy tay: tab Actions → workflow này → Run workflow (có tuỳ chọn dry_run).
-# Đẩy thay đổi vào tygia/check.py hoặc file này → tự chạy thử dry-run,
-# kết quả ghi vào tygia/test/, không gửi Viber.
+# Lịch: lịch của GitHub hay trễ 5–30 phút, nên workflow được gọi sớm (7:45, dự phòng 8:15),
+# rồi CHỜ đến đúng 08:30 giờ VN mới đọc hai trang — đọc MỘT lần duy nhất, không thử lại.
+# Mỗi ngày chỉ đối chiếu một lần: lần gọi dự phòng thấy đã có kết quả hôm nay thì bỏ qua.
+#
+# Kết quả: KHỚP / LỆCH / Không đối chiếu được → tygia/bao-cao.txt → Viber kênh RIÊNG.
+# Secret bắt buộc: VIBER_TOKEN_TYGIA — token của kênh Viber riêng cho đối chiếu tỷ giá,
+# KHÔNG dùng VIBER_TOKEN của kênh Cà phê sáng.
+#
+# Chạy tay: tab Actions → workflow này → Run workflow (dry_run = chạy thử, không gửi Viber).
 
 name: Đối chiếu tỷ giá trung tâm SBV–TCB
 
 on:
   schedule:
-    - cron: '30 1 * * *'        # 01:30 UTC = 08:30 giờ Việt Nam
+    - cron: '45 0 * * *'        # 07:45 giờ VN — lần gọi chính, chờ đến 08:30
+    - cron: '15 1 * * *'        # 08:15 giờ VN — dự phòng nếu lần chính bị GitHub bỏ lỡ
   workflow_dispatch:
     inputs:
       dry_run:
         description: 'Chạy thử: ghi vào tygia/test/, không gửi Viber'
         type: boolean
         default: false
-  push:
-    branches: [main]
-    paths:
-      - 'tygia/check.py'
-      - '.github/workflows/tygia-doichieu.yml'
 
 permissions:
   contents: write
@@ -35,35 +34,59 @@ concurrency:
 jobs:
   doichieu:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     env:
       TZ: Asia/Ho_Chi_Minh
-      DRY_RUN: ${{ github.event_name == 'push' || inputs.dry_run == true }}
+      DRY_RUN: ${{ inputs.dry_run == true }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: Hôm nay đã đối chiếu chưa? (mỗi ngày một lần)
+        id: guard
+        run: |
+          git pull -q origin main || true
+          f="tygia/archive/$(date +%Y-%m-%d).txt"
+          if [ "${{ github.event_name }}" = "schedule" ] && [ -f "$f" ]; then
+            echo "Đã có $f — bỏ qua lần gọi này."; echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-python@v5
+        if: steps.guard.outputs.skip != 'true'
         with:
           python-version: '3.12'
 
       - name: Cài trình duyệt dự phòng (Playwright Chromium)
+        if: steps.guard.outputs.skip != 'true'
         run: |
           pip install -q playwright
           python -m playwright install --with-deps chromium > /dev/null
 
-      - name: Đọc và đối chiếu
+      - name: Chờ đến đúng 08:30 giờ Việt Nam
+        if: steps.guard.outputs.skip != 'true' && github.event_name == 'schedule'
+        run: |
+          target=$(date -d "today 08:30:00" +%s); now=$(date +%s)
+          if [ "$now" -lt "$target" ]; then
+            echo "Chờ $((target - now)) giây đến 08:30"; sleep $((target - now))
+          else
+            echo "Đã quá 08:30 (GitHub gọi trễ) — đối chiếu ngay."
+          fi
+
+      - name: Đọc hai trang và đối chiếu (một lần)
+        if: steps.guard.outputs.skip != 'true'
         env:
           OUT_DIR: ${{ env.DRY_RUN == 'true' && 'tygia/test' || 'tygia' }}
-          WAIT_UNTIL: ${{ env.DRY_RUN == 'true' && '00:00' || '09:20' }}
         run: python3 tygia/check.py
 
       - name: Lưu bản sao theo ngày
-        if: env.DRY_RUN != 'true'
+        if: steps.guard.outputs.skip != 'true' && env.DRY_RUN != 'true'
         run: |
           mkdir -p tygia/archive
           cp tygia/bao-cao.txt "tygia/archive/$(date +%Y-%m-%d).txt"
 
-      - name: Commit và đẩy kết quả
+      - name: Commit và đẩy kết quả lên GitHub
+        if: steps.guard.outputs.skip != 'true'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -78,16 +101,17 @@ jobs:
           done
           echo "Push thất bại"; exit 1
 
-      - name: Gửi Viber kênh riêng
-        if: env.DRY_RUN != 'true'
+      - name: Gửi kết quả sang kênh Viber riêng
+        if: steps.guard.outputs.skip != 'true' && env.DRY_RUN != 'true'
         env:
           VIBER_TOKEN: ${{ secrets.VIBER_TOKEN_TYGIA }}
         run: |
           set -euo pipefail
-          [ -n "${VIBER_TOKEN}" ] || { echo "Chưa có secret VIBER_TOKEN_TYGIA — dừng."; exit 1; }
+          [ -n "${VIBER_TOKEN}" ] || { echo "Chưa có secret VIBER_TOKEN_TYGIA — không gửi."; exit 1; }
           text=$(head -c 6500 tygia/bao-cao.txt)
           info=$(curl -sS -X POST https://chatapi.viber.com/pa/get_account_info \
             -H "X-Viber-Auth-Token: $VIBER_TOKEN" -H "Content-Type: application/json" -d '{}')
+          echo "Kênh nhận: $(echo "$info" | jq -r '.name // "?"')"
           admin_id=$(echo "$info" | jq -r '[.members[]? | select(.role == "superadmin") | .id][0] // empty')
           [ -n "$admin_id" ] || { echo "Không lấy được ID superadmin: $(echo "$info" | jq -c '{status, status_message}')"; exit 1; }
           payload=$(jq -n --arg from "$admin_id" --arg text "$text" \

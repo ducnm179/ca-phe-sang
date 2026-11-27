@@ -7,15 +7,12 @@ Chạy trong GitHub Actions (xem .github/workflows/tygia-doichieu.yml).
   - ghi file theo OUT_DIR (mặc định tygia/): bao-cao.txt, ketqua.json
 Biến môi trường:
   OUT_DIR       thư mục ghi kết quả (mặc định "tygia")
-  WAIT_UNTIL    giờ VN HH:MM; nếu TCB chưa cập nhật hôm nay hoặc lệch SBV
-                thì chờ và đọc lại đến giờ này (mặc định "09:20")
-  RETRY_SECONDS khoảng chờ giữa các lần đọc lại (mặc định 300)
+Kết quả chỉ một trong ba: KHỚP / LỆCH / Không đối chiếu được.
 """
 import json
 import os
 import re
 import sys
-import time
 import unicodedata
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -175,86 +172,41 @@ def get_tcb(diag):
 
 
 # ---------------- Đối chiếu ----------------
-def compare(sbv, tcb, today):
-    notes = []
+def compare(sbv, tcb):
+    """Chỉ một kết luận: khớp / lệch / không đối chiếu được."""
     if sbv is None or tcb is None:
-        src = " và ".join(n for n, v in (("SBV", sbv), ("TCB", tcb)) if v is None)
-        return "⚠️", f"Không đối chiếu được: {src} không truy cập được", notes
-    ok = sbv["central"] == tcb["central"]
-    # R2: trần/sàn ±5%
-    if tcb.get("ceiling") and tcb.get("floor"):
-        exp_c, exp_f = sbv["central"] * 1.05, sbv["central"] * 0.95
-        if abs(tcb["ceiling"] - exp_c) > 1 or abs(tcb["floor"] - exp_f) > 1:
-            notes.append(f"Lưu ý: trần/sàn TCB ({vnd(tcb['ceiling'])}/{vnd(tcb['floor'])}) "
-                         f"khác biên ±5% tính từ SBV ({vnd(round(exp_c))}/{vnd(round(exp_f))}).")
-    # R3: ngày áp dụng SBV
-    if sbv.get("ngay_ap_dung") and sbv["ngay_ap_dung"] != today.strftime("%d/%m/%Y"):
-        notes.append(f"Lưu ý: SBV chưa công bố cho hôm nay; đang so với bản áp dụng {sbv['ngay_ap_dung']}.")
-    if tcb.get("ngay_cap_nhat") and tcb["ngay_cap_nhat"] != today.strftime("%Y-%m-%d"):
-        notes.append(f"Lưu ý: dữ liệu TCB cập nhật ngày {tcb['ngay_cap_nhat']}, chưa phải hôm nay.")
-    return ("✅", MATCH_TEXT, notes) if ok else ("❌", MISMATCH_TEXT, notes)
+        src = " và ".join(n for n, v in (("website SBV", sbv), ("website TCB", tcb)) if v is None)
+        return "⚠️", f"Không đối chiếu được: {src} không truy cập được"
+    if sbv["central"] == tcb["central"]:
+        return "✅", f"KHỚP – {MATCH_TEXT}"
+    return "❌", f"LỆCH – {MISMATCH_TEXT}"
 
 
-def build_report(ts, sbv, tcb, icon, verdict, notes, diag):
-    L = [f"📊 Đối chiếu tỷ giá trung tâm – {ts.strftime('%d/%m/%Y %H:%M')}"]
-    if sbv:
-        L.append(f"• SBV: {vnd(sbv['central'])} VND (áp dụng {sbv.get('ngay_ap_dung') or '?'}, "
-                 f"VB {sbv.get('so_van_ban') or '?'})")
-    else:
-        L.append("• SBV: không đọc được")
-    if tcb:
-        extra = []
-        if tcb.get("ceiling") and tcb.get("floor"):
-            extra.append(f"trần {vnd(tcb['ceiling'])} / sàn {vnd(tcb['floor'])}")
-        if tcb.get("gio_cap_nhat"):
-            extra.append(f"cập nhật {tcb['gio_cap_nhat']}")
-        L.append(f"• TCB: {vnd(tcb['central'])} VND" + (f" ({', '.join(extra)})" if extra else ""))
-    else:
-        L.append("• TCB: không đọc được")
-    if sbv and tcb:
+def build_report(ts, sbv, tcb, icon, verdict):
+    L = [f"📊 Đối chiếu tỷ giá trung tâm – {ts.strftime('%d/%m/%Y %H:%M')}",
+         f"• SBV: {vnd(sbv['central']) + ' VND' if sbv else 'không truy cập được'}",
+         f"• TCB: {vnd(tcb['central']) + ' VND' if tcb else 'không truy cập được'}"]
+    if sbv and tcb and sbv["central"] != tcb["central"]:
         d = tcb["central"] - sbv["central"]
-        L.append(f"• Chênh lệch: {'+' if d > 0 else ''}{vnd(d)} VND")
+        L.append(f"• Chênh lệch TCB − SBV: {'+' if d > 0 else ''}{vnd(d)} VND")
     L.append(f"{icon} {verdict}")
-    L += notes
-    if icon == "⚠️":
-        for k in ("sbv_errors", "tcb_errors"):
-            if diag.get(k):
-                L.append(f"Chi tiết lỗi {k[:3].upper()}: {diag[k][-1][:300]}")
-    L.append("Nguồn: sbv.gov.vn/vi/tỷ-giá · techcombank.com/cong-cu-tien-ich/ty-gia")
     return "\n".join(L) + "\n"
 
 
 def main():
     out_dir = os.environ.get("OUT_DIR", "tygia")
-    wait_until = os.environ.get("WAIT_UNTIL", "09:20")
-    retry = int(os.environ.get("RETRY_SECONDS", "300"))
-    today = now_vn().date()
-    hh, mm = map(int, wait_until.split(":"))
-    deadline = datetime.combine(today, datetime.min.time(), VN).replace(hour=hh, minute=mm)
-
-    attempt = 0
-    while True:
-        attempt += 1
-        diag = {}
-        sbv, tcb = get_sbv(diag), get_tcb(diag)
-        icon, verdict, notes = compare(sbv, tcb, today)
-        tcb_stale = tcb and tcb.get("ngay_cap_nhat") and tcb["ngay_cap_nhat"] != today.isoformat()
-        print(f"[lần {attempt}] {now_vn():%H:%M:%S} SBV={sbv} TCB={tcb} -> {icon}", file=sys.stderr)
-        if icon == "✅" and not tcb_stale:
-            break
-        if now_vn() + timedelta(seconds=retry) > deadline:
-            break
-        time.sleep(retry)
-
+    diag = {}
+    sbv, tcb = get_sbv(diag), get_tcb(diag)  # đọc đúng MỘT lần, không thử lại
+    icon, verdict = compare(sbv, tcb)
     ts = now_vn()
-    report = build_report(ts, sbv, tcb, icon, verdict, notes, diag)
+    report = build_report(ts, sbv, tcb, icon, verdict)
     print(report)
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "bao-cao.txt"), "w", encoding="utf-8") as f:
         f.write(report)
     with open(os.path.join(out_dir, "ketqua.json"), "w", encoding="utf-8") as f:
-        json.dump({"thoi_diem": ts.isoformat(), "so_lan_doc": attempt, "ket_luan": icon,
-                   "sbv": sbv, "tcb": tcb, "ghi_chu": notes, "chan_doan": diag},
+        json.dump({"thoi_diem": ts.isoformat(), "ket_luan": icon,
+                   "sbv": sbv, "tcb": tcb, "chan_doan": diag},
                   f, ensure_ascii=False, indent=2)
 
 
